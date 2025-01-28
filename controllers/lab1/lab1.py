@@ -1,4 +1,8 @@
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
+from matplotlib import pyplot as plt
 import math
 from controller import Robot, DistanceSensor, Motor, LightSensor
 from enum import Enum, auto
@@ -17,13 +21,48 @@ TURN_MAX = 90
 TURN_MIN = -90
 MAX_TURN_SPEED = STANDARD_SPEED
 
+light_sensor_values = []
+
 class RobotState(Enum):
     LEFT_WALL = auto()
     RIGHT_WALL = auto()
-    TURN_180 = auto()
     STOP = auto()
 
-class Sensor:
+class LightSensor:
+    def __init__(self, name, r):
+        self.name = name
+        self.sensor = r.getDevice(name)
+        table = self.sensor.getLookupTable()
+        self.lookup_table = [
+            table[i:i + 3] for i in range(0, len(table), 3)
+        ]
+        self.irradiances = [row[0] for row in self.lookup_table]  # Input irradiance values
+        self.sensor_outputs = [row[1] for row in self.lookup_table]  # Sensor output values
+        self.sensor.enable(TIME_STEP_MS)
+
+    def calculate_irradiance(self, sensor_value):
+        if sensor_value >= self.sensor_outputs[0]:
+            return self.irradiances[0]
+        elif sensor_value <= self.sensor_outputs[-1]:
+            return self.irradiances[-1]
+
+        # Linear interpolation between lookup table points
+        for i in range(len(self.sensor_outputs) - 1):
+            if self.sensor_outputs[i] >= sensor_value >= self.sensor_outputs[i + 1]:
+                # Interpolate
+                y0, x0 = self.sensor_outputs[i], self.irradiances[i]
+                y1, x1 = self.sensor_outputs[i + 1], self.irradiances[i + 1]
+                return x0 + (sensor_value - y0) * (x1 - y0) / (y1 - y0)
+        # Return None if no match (shouldn't happen)
+        return None
+
+    def read_irradiance(self):
+        sensor_value = self.sensor.getValue()
+        irradiance = self.calculate_irradiance(sensor_value)
+        # Optionally, add noise based on noise_levels
+        return irradiance
+
+class DistanceSensor:
     def __init__(self, name, r):
         self.name = name
         self.sensor = r.getDevice(name)
@@ -37,7 +76,7 @@ class Sensor:
             "ps6": 314.209213,
             "ps7": 342.857103
         }
-        self.angle = angles.get(name, -1)
+        self.angle = angles.get(name, 0)
         table = self.sensor.getLookupTable()
         self.lookup_table = [
             table[i:i + 3] for i in range(0, len(table), 3)
@@ -140,17 +179,17 @@ class RobotClass:
     def __init__(self):
         self.state = RobotState.LEFT_WALL
         self.robot = Robot()
-        self.ps:dict[str,Sensor]= {}
+        self.ps:dict[str,DistanceSensor]= {}
         ps_names = ['ps0', 'ps1', 'ps2', 'ps3',
                         'ps4', 'ps5', 'ps6', 'ps7']
-        self.ls:dict[str,Sensor] = {}
+        self.ls:dict[str,LightSensor] = {}
         ls_names = ['ls0', 'ls1', 'ls2', 'ls3',
                         'ls4', 'ls5', 'ls6', 'ls7']
         for name in ps_names:
-            self.ps[name] = Sensor(name, self.robot)
+            self.ps[name] = DistanceSensor(name, self.robot)
 
         for name in ls_names:
-            self.ls[name] = Sensor(name, self.robot)
+            self.ls[name] = LightSensor(name, self.robot)
 
         self.motors = {'left': self.robot.getDevice('left wheel motor'),
                        'right': self.robot.getDevice('right wheel motor')}
@@ -224,7 +263,14 @@ class RobotClass:
         elif direction == 'right':
             return self.ps['ps2'].read()
 
-    # def evaluate_state(self):
+    def evaluate_state(self):
+        light_sensor_values.append(self.ls['ls0'].read_irradiance())
+        light_sensor_values.append(self.ls['ls1'].read_irradiance())
+        light_sensor_values.append(self.ls['ls2'].read_irradiance())
+        light_sensor_values.append(self.ls['ls5'].read_irradiance())
+        light_sensor_values.append(self.ls['ls6'].read_irradiance())
+        light_sensor_values.append(self.ls['ls7'].read_irradiance())
+
         # TODO
 
     def execute_state(self):
@@ -253,8 +299,28 @@ class RobotClass:
 # Global variable to track turn direction
 robot = RobotClass()
 
+async def histogram_async(data, bins=10):
+    if len(data) % (6 * 20) != 0:
+        return None
+
+    # Offload the blocking Matplotlib operations to a thread pool
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor() as executor:
+        return await loop.run_in_executor(executor, _plot_histogram, data, bins)
+
+def _plot_histogram(data, bins):
+    plt.ion()
+    plt.figure()
+    hist, bin_edges = np.histogram(data, bins=bins)
+    width = 0.7 * (bin_edges[1] - bin_edges[0])
+    center = (bin_edges[:-1] + bin_edges[1:]) / 2
+    plt.bar(center, hist, align='center', width=width)
+    plt.show()
+    return hist, bin_edges
+
 # Main loop: Continue until an exit event occurs
 while robot.robot.step(TIME_STEP_MS) != -1:
     # Set motor velocities
-    # robot.evaluate_state()
+    robot.evaluate_state()
+    asyncio.run(histogram_async(light_sensor_values))
     robot.execute_state()
