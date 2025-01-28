@@ -18,13 +18,11 @@ TexturedBackgroundLight {
 RectangleArena {
 }
 E-puck {
-  hidden translation_1 0 0.026 0.02
   hidden rotation_1 0 1 0 3.3103123543643136
-  hidden translation_2 0 -0.026 0.02
   hidden rotation_2 0 1 0 3.149594784984438
   translation 0.3746054595547882 0.436350921839046 -6.421645281172277e-05
   rotation -0.0003088724735533727 -0.011296181318390238 -0.9999361484041955 0.05641464679584414
-  controller "lab1"
+  controller "<extern>"
 }
 Solid {
   translation 1.0145537147274877e-07 -0.4004156769488476 0.04961128038337848
