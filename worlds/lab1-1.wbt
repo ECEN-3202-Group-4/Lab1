@@ -3,24 +3,25 @@
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/objects/backgrounds/protos/TexturedBackground.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/objects/floors/protos/RectangleArena.proto"
-EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/robots/gctronic/e-puck/protos/E-puck.proto"
+EXTERNPROTO "../protos/E-puck.proto"
 
 WorldInfo {
 }
 Viewpoint {
   orientation 0.004602311324531792 0.9999681918056109 -0.0065141467199449615 1.229579116124019
-  position -0.8136973458236966 0.10127951341404988 2.4217217039011727
+  position -0.29490380484812984 -0.06281199915322894 1.475901254936944
+  follow "e-puck"
+  followType "Pan and Tilt Shot"
 }
 TexturedBackground {
 }
 TexturedBackgroundLight {
 }
 RectangleArena {
+  floorTileSize 0.05 0.05
 }
 E-puck {
-  hidden rotation_1 0 1 0 3.3103123543643136
-  hidden rotation_2 0 1 0 3.149594784984438
-  translation 0.3746054595547882 0.436350921839046 -6.421645281172277e-05
+  translation -0.426373 0.441522 -0.000574173
   rotation -0.0003088724735533727 -0.011296181318390238 -0.9999361484041955 0.05641464679584414
   controller "<extern>"
 }
