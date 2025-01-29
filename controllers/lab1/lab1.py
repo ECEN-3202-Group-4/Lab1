@@ -1,6 +1,5 @@
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
-
+import signal
+import atexit
 import numpy as np
 from matplotlib import pyplot as plt
 import math
@@ -13,7 +12,7 @@ TIME_STEP = TIME_STEP_MS / 1000
 
 # General Behavoir
 WHEEL_RADIUS = 0.02
-MAX_SPEED = WHEEL_RADIUS * 6.28 # max speed in m/s
+MAX_SPEED = WHEEL_RADIUS * 6.28  # max speed in m/s
 STANDARD_SPEED = MAX_SPEED / 2
 
 # Turning behavior
@@ -22,11 +21,15 @@ TURN_MIN = -90
 MAX_TURN_SPEED = STANDARD_SPEED
 
 light_sensor_values = []
+light_sensor_count = []
+highlight = 0
+
 
 class RobotState(Enum):
     LEFT_WALL = auto()
     RIGHT_WALL = auto()
     STOP = auto()
+
 
 class LightSensor:
     def __init__(self, name, r):
@@ -49,10 +52,10 @@ class LightSensor:
         # Linear interpolation between lookup table points
         for i in range(len(self.sensor_outputs) - 1):
             if self.sensor_outputs[i] >= sensor_value >= self.sensor_outputs[i + 1]:
-                # Interpolate
+                # Interpolate correctly
                 y0, x0 = self.sensor_outputs[i], self.irradiances[i]
                 y1, x1 = self.sensor_outputs[i + 1], self.irradiances[i + 1]
-                return x0 + (sensor_value - y0) * (x1 - y0) / (y1 - y0)
+                return x0 + (sensor_value - y0) * (x1 - x0) / (y1 - y0)
         # Return None if no match (shouldn't happen)
         return None
 
@@ -61,6 +64,7 @@ class LightSensor:
         irradiance = self.calculate_irradiance(sensor_value)
         # Optionally, add noise based on noise_levels
         return irradiance
+
 
 class DistanceSensor:
     def __init__(self, name, r):
@@ -104,6 +108,7 @@ class DistanceSensor:
     def read(self):
         return self.calculate_distance(self.sensor.getValue())
 
+
 class WallFollower:
     def __init__(self, r):
         self.prev_distances = []
@@ -125,14 +130,13 @@ class WallFollower:
         dist: float = -1
         if self.robot.state == RobotState.LEFT_WALL:
             dist = self.robot.get_distance('left')
-
         elif self.robot.state == RobotState.RIGHT_WALL:
             dist = self.robot.get_distance('right')
-
         if dist == -1:
             raise ValueError("Distance sensor read error.")
-        dist = 100 * dist # convert from m to mm
-        if dist >= 6.8: # can't see wall
+
+        dist = 100 * dist  # convert from m to mm
+        if dist >= 6.8:  # can't see wall
             self.clear()
             covered_distance = 0.0
             while covered_distance < 0.04:
@@ -149,7 +153,7 @@ class WallFollower:
                 angle = self.robot.angle + 90
                 while self.robot.angle < angle:
                     self.robot.turn(0, 90)
-                    self.robot.step(TIME_STEP_MS)
+                    self.robot.robot.step(TIME_STEP_MS)
             covered_distance = 0.0
             while covered_distance < 0.06:
                 self.robot.go_forward(STANDARD_SPEED)
@@ -173,18 +177,24 @@ class WallFollower:
         w = (self.WALL_FOLLOW_KP * error) + (self.WALL_FOLLOW_KI * self.integral) + (
                 self.WALL_FOLLOW_KD * derivative)
         w_deg = np.degrees(w)
-        self.robot.turn(MAX_TURN_SPEED, w_deg)
+        if self.robot.state is RobotState.RIGHT_WALL:
+            w_deg *= -1
+        if abs(w_deg) > 2:
+            self.robot.turn(MAX_TURN_SPEED, w_deg)
+        else:
+            self.robot.turn(2 * (MAX_SPEED / 3), w_deg)
+
 
 class RobotClass:
     def __init__(self):
         self.state = RobotState.LEFT_WALL
         self.robot = Robot()
-        self.ps:dict[str,DistanceSensor]= {}
+        self.ps: dict[str, DistanceSensor] = {}
         ps_names = ['ps0', 'ps1', 'ps2', 'ps3',
-                        'ps4', 'ps5', 'ps6', 'ps7']
-        self.ls:dict[str,LightSensor] = {}
+                    'ps4', 'ps5', 'ps6', 'ps7']
+        self.ls: dict[str, LightSensor] = {}
         ls_names = ['ls0', 'ls1', 'ls2', 'ls3',
-                        'ls4', 'ls5', 'ls6', 'ls7']
+                    'ls4', 'ls5', 'ls6', 'ls7']
         for name in ps_names:
             self.ps[name] = DistanceSensor(name, self.robot)
 
@@ -209,10 +219,10 @@ class RobotClass:
         w_rad = np.radians(w)
         wheelbase = 0.052  # from the e-puck proto file
 
-        v_rel = w_rad * (wheelbase / 2) # relative velocity
+        v_rel = w_rad * (wheelbase / 2)  # relative velocity
 
         v_left = v + v_rel
-        v_right = v - v_rel# Adjust speeds to ensure they don't exceed max wheel speed
+        v_right = v - v_rel  # Adjust speeds to ensure they don't exceed max wheel speed
         while abs(v_left) > MAX_SPEED or abs(v_right) > MAX_SPEED:
             # Scale down v to ensure both wheel speeds stay within limits
             scaling_factor = max(abs(v_left) / MAX_SPEED, abs(v_right) / MAX_SPEED)
@@ -221,8 +231,7 @@ class RobotClass:
             v_left = v + v_rel
             v_right = v - v_rel
 
-
-        #convert to w
+        # convert to w
         w_left = v_left / WHEEL_RADIUS
         w_right = v_right / WHEEL_RADIUS
 
@@ -236,12 +245,13 @@ class RobotClass:
 
     def get_distance(self, direction):
         if direction == 'forward':
-            name:str
+            name: str
             if self.state == RobotState.LEFT_WALL:
                 name = 'ps0'
             elif self.state == RobotState.RIGHT_WALL:
                 name = 'ps7'
-            else: return -1
+            else:
+                return -1
             h = self.ps[name].read()
             angle = self.ps[name].angle
             return h * math.cos(np.radians(angle))
@@ -264,20 +274,41 @@ class RobotClass:
             return self.ps['ps2'].read()
 
     def evaluate_state(self):
-        light_sensor_values.append(self.ls['ls0'].read_irradiance())
-        light_sensor_values.append(self.ls['ls1'].read_irradiance())
-        light_sensor_values.append(self.ls['ls2'].read_irradiance())
-        light_sensor_values.append(self.ls['ls5'].read_irradiance())
-        light_sensor_values.append(self.ls['ls6'].read_irradiance())
-        light_sensor_values.append(self.ls['ls7'].read_irradiance())
+        if self.state == RobotState.STOP:
+            return  # do nothing
+        local_irradiance_values = []
+        sensors = ['ls0', 'ls1', 'ls2', 'ls5', 'ls6', 'ls7']
+        for sensor in sensors:
+            irradiance = self.ls[sensor].read_irradiance()
+            local_irradiance_values.append(irradiance)  # Store in local list
+            light_sensor_values.append(irradiance)  # Append to global list
 
+        threshold = 2
+        count_above_threshold = sum(value >= threshold for value in local_irradiance_values)
+        light_sensor_count.append(count_above_threshold)
+        if count_above_threshold == len(local_irradiance_values):
+            if self.state == RobotState.LEFT_WALL:
+                # turn 180
+                angle = self.angle - 180
+                self.turn(0, -90)
+                self.robot.step(TIME_STEP_MS)
+                while self.angle > angle:
+                    self.turn(0, -90)
+                    self.robot.step(TIME_STEP_MS)
+
+                self.wall_follower.clear()
+                self.state = RobotState.RIGHT_WALL
+            elif self.state == RobotState.RIGHT_WALL:
+                self.wall_follower.clear()
+                self.go_forward(0)
+                self.state = RobotState.STOP
         # TODO
 
     def execute_state(self):
         # TODO
 
         if self.state == RobotState.STOP:
-            return  #do nothing
+            return  # do nothing
         if self.state == RobotState.LEFT_WALL or self.state == RobotState.RIGHT_WALL:
             forward_dist = self.get_distance('forward')
             forward_dist *= 100
@@ -296,31 +327,61 @@ class RobotClass:
                         self.turn(0, -90)
                         self.robot.step(TIME_STEP_MS)
 
+
 # Global variable to track turn direction
 robot = RobotClass()
 
-async def histogram_async(data, bins=10):
-    if len(data) % (6 * 20) != 0:
-        return None
+import matplotlib.pyplot as plt
+import numpy as np
 
-    # Offload the blocking Matplotlib operations to a thread pool
-    loop = asyncio.get_event_loop()
-    with ThreadPoolExecutor() as executor:
-        return await loop.run_in_executor(executor, _plot_histogram, data, bins)
 
-def _plot_histogram(data, bins):
-    plt.ion()
+def histogram(data, bins=20):
+    plt.ion()  # Enable interactive mode
     plt.figure()
+
+    # Calculate histogram data
     hist, bin_edges = np.histogram(data, bins=bins)
+    total = sum(hist)  # Total count of all data points
+
+    # Calculate widths of bars and bin centers
     width = 0.7 * (bin_edges[1] - bin_edges[0])
     center = (bin_edges[:-1] + bin_edges[1:]) / 2
-    plt.bar(center, hist, align='center', width=width)
+
+    # Convert counts to percentages
+    percentages = (hist / total) * 100
+
+    # Plot the histogram as a bar chart
+    bars = plt.bar(center, hist, align='center', width=width)
+
+    # Label the percentages above the bars
+    for bar, percentage in zip(bars, percentages):
+        plt.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1,
+                 f'{percentage:.1f}%', ha='center', fontsize=8)
+
+    # Customize plot labels and title
+    plt.xlabel("Bins")
+    plt.ylabel("Counts")
+    plt.title("Histogram with Percentage Occurrences")
     plt.show()
+
     return hist, bin_edges
+
+
+def handle_sigint(signum, frame):
+    histogram(light_sensor_values, 20)
+
+
+def cleanup():
+    print("Program exiting. Generating histogram...")
+    histogram(light_sensor_values, 20)
+
+
+# Register both the signal handler and the atexit cleanup
+signal.signal(signal.SIGINT, handle_sigint)
+atexit.register(cleanup)
 
 # Main loop: Continue until an exit event occurs
 while robot.robot.step(TIME_STEP_MS) != -1:
     # Set motor velocities
     robot.evaluate_state()
-    asyncio.run(histogram_async(light_sensor_values))
     robot.execute_state()
