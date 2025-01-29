@@ -1,7 +1,4 @@
-import signal
-import atexit
 import numpy as np
-from matplotlib import pyplot as plt
 import math
 from controller import Robot, DistanceSensor, Motor, LightSensor
 from enum import Enum, auto
@@ -24,12 +21,10 @@ light_sensor_values = []
 light_sensor_count = []
 highlight = 0
 
-
 class RobotState(Enum):
     LEFT_WALL = auto()
     RIGHT_WALL = auto()
     STOP = auto()
-
 
 class LightSensor:
     def __init__(self, name, r):
@@ -64,7 +59,6 @@ class LightSensor:
         irradiance = self.calculate_irradiance(sensor_value)
         # Optionally, add noise based on noise_levels
         return irradiance
-
 
 class DistanceSensor:
     def __init__(self, name, r):
@@ -107,7 +101,6 @@ class DistanceSensor:
 
     def read(self):
         return self.calculate_distance(self.sensor.getValue())
-
 
 class WallFollower:
     def __init__(self, r):
@@ -183,7 +176,6 @@ class WallFollower:
             self.robot.turn(MAX_TURN_SPEED, w_deg)
         else:
             self.robot.turn(2 * (MAX_SPEED / 3), w_deg)
-
 
 class RobotClass:
     def __init__(self):
@@ -327,58 +319,8 @@ class RobotClass:
                         self.turn(0, -90)
                         self.robot.step(TIME_STEP_MS)
 
-
 # Global variable to track turn direction
 robot = RobotClass()
-
-import matplotlib.pyplot as plt
-import numpy as np
-
-
-def histogram(data, bins=20):
-    plt.ion()  # Enable interactive mode
-    plt.figure()
-
-    # Calculate histogram data
-    hist, bin_edges = np.histogram(data, bins=bins)
-    total = sum(hist)  # Total count of all data points
-
-    # Calculate widths of bars and bin centers
-    width = 0.7 * (bin_edges[1] - bin_edges[0])
-    center = (bin_edges[:-1] + bin_edges[1:]) / 2
-
-    # Convert counts to percentages
-    percentages = (hist / total) * 100
-
-    # Plot the histogram as a bar chart
-    bars = plt.bar(center, hist, align='center', width=width)
-
-    # Label the percentages above the bars
-    for bar, percentage in zip(bars, percentages):
-        plt.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1,
-                 f'{percentage:.1f}%', ha='center', fontsize=8)
-
-    # Customize plot labels and title
-    plt.xlabel("Bins")
-    plt.ylabel("Counts")
-    plt.title("Histogram with Percentage Occurrences")
-    plt.show()
-
-    return hist, bin_edges
-
-
-def handle_sigint(signum, frame):
-    histogram(light_sensor_values, 20)
-
-
-def cleanup():
-    print("Program exiting. Generating histogram...")
-    histogram(light_sensor_values, 20)
-
-
-# Register both the signal handler and the atexit cleanup
-signal.signal(signal.SIGINT, handle_sigint)
-atexit.register(cleanup)
 
 # Main loop: Continue until an exit event occurs
 while robot.robot.step(TIME_STEP_MS) != -1:
